@@ -30,12 +30,75 @@ app.get('/health', (req, res) => {
 // Video analysis endpoint for interview feedback
 app.post('/api/analyze-interview', (req, res) => {
   const { frameData } = req.body;
-  
+
   // Simulated analysis based on frame data patterns
   // In production, this would use computer vision ML models
   const analysis = analyzeInterviewFrames(frameData);
-  
+
   res.json(analysis);
+});
+
+// Generate interview questions via OpenRouter (cheap LLM, avoids burning OpenAI Realtime credits)
+app.post('/api/generate-questions', async (req, res) => {
+  const { field, experience, difficulty, count } = req.body;
+
+  if (!field || !experience || !difficulty || !count) {
+    return res.status(400).json({ error: 'Missing required fields: field, experience, difficulty, count' });
+  }
+
+  const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+  if (!OPENROUTER_API_KEY || OPENROUTER_API_KEY === 'your_openrouter_api_key_here') {
+    return res.status(500).json({ error: 'OPENROUTER_API_KEY not configured in backend/.env' });
+  }
+
+  const userPrompt = `Generate exactly ${count} interview questions for a ${experience}-level candidate applying for a ${field} role. Difficulty level: ${difficulty}.
+
+Return ONLY a valid JSON array of question strings. No markdown, no code blocks, no explanation. Just the raw JSON array.
+Example format: ["Question one?","Question two?","Question three?"]`;
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://speakease.app',
+        'X-Title': 'SpeakEase'
+      },
+      body: JSON.stringify({
+        model: 'meta-llama/llama-3.1-8b-instruct',
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.7,
+        max_tokens: 1200
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('OpenRouter error:', errText);
+      return res.status(502).json({ error: 'Question generation failed. Check your OpenRouter API key.' });
+    }
+
+    const data = await response.json();
+    const rawContent = data.choices[0].message.content.trim();
+
+    // Strip markdown code fences if LLM wraps output in ```json ... ```
+    const jsonString = rawContent
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/, '')
+      .trim();
+
+    const questions = JSON.parse(jsonString);
+
+    if (!Array.isArray(questions)) {
+      throw new Error('Response is not a JSON array');
+    }
+
+    res.json({ questions: questions.slice(0, count) });
+  } catch (err) {
+    console.error('Failed to generate questions:', err);
+    res.status(500).json({ error: 'Failed to parse questions from AI response' });
+  }
 });
 
 /**
@@ -129,17 +192,19 @@ Your goal is to help them sound professional and confident in office settings.
 - Provide examples of professional phrases
 - Encourage formal vocabulary without being stiff`,
 
-  interview: `You are an HR interviewer conducting a job interview with a college student.
-Your goal is to give them realistic interview practice.
-- Be professional and encouraging
-- Ask common interview questions one at a time
-- Listen to their full response before asking the next question
-- Questions to cover: Tell me about yourself, strengths/weaknesses, why this role, 
-  situational questions, where do you see yourself in 5 years, any questions for us
-- Don't provide feedback during the interview
-- If they speak Hindi or Marathi, kindly remind them to respond in English
-- Keep a natural interview flow
-- End with "Thank you for your time. The interview is now complete."`
+  interview: `You are a senior hiring manager conducting a real job interview. Your job is to evaluate the candidate objectively — not to coach, encourage, or validate them.
+
+Behavioural rules:
+- Ask one question at a time. Wait for the candidate's full response before reacting.
+- Do NOT praise every answer with phrases like "Great!", "That's wonderful!", "Excellent point!" — only acknowledge when genuinely warranted.
+- If the answer is vague, too short, or unconvincing, ask a pointed follow-up. Examples: "Can you be more specific?", "What was the actual outcome?", "How did you measure that?", "Walk me through the steps you took."
+- If the candidate goes off-topic or rambles for too long, cut in and redirect: "Let's stay focused — what was the result?", "I'll stop you there. The question was about X."
+- If the candidate goes silent or gives an "I don't know" response, briefly acknowledge it and move to the next question without dwelling on it: "Alright, let's move on."
+- Never provide hints, tips, or coaching during the interview.
+- Keep your own responses short and direct — you are asking questions, not giving feedback.
+- If they speak Hindi or Marathi, say once: "Please respond in English for this interview."
+- Cover: self-introduction, strengths and weaknesses (push for specifics), motivation for the role, a situational or behavioural scenario, and career goals.
+- End the interview naturally when all topics are covered. Close with exactly: "Thank you for your time. The interview is now complete."`
 };
 
 // Handle WebSocket connections
@@ -149,8 +214,43 @@ wss.on('connection', (clientWs, req) => {
   // Extract mode from query params
   const url = new URL(req.url, `http://${req.headers.host}`);
   const mode = url.searchParams.get('mode') || 'casual';
-  
+
   console.log(`Mode: ${mode}`);
+
+  // Build effective system prompt — for interview mode, inject pre-generated questions if provided
+  let effectivePrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS['casual'];
+
+  if (mode === 'interview') {
+    const encodedSetup = url.searchParams.get('q');
+    if (encodedSetup) {
+      try {
+        const setup = JSON.parse(Buffer.from(encodedSetup, 'base64').toString('utf-8'));
+        const { field, experience, difficulty, questions } = setup;
+        if (Array.isArray(questions) && questions.length > 0) {
+          const questionList = questions.map((q, i) => `${i + 1}. ${q}`).join('\n');
+          effectivePrompt = `You are a senior hiring manager conducting a real job interview for a ${field || 'general'} role (${experience || 'entry'} level, ${difficulty || 'medium'} difficulty). Your job is to evaluate the candidate objectively — not to coach, encourage, or validate them.
+
+You have ${questions.length} prepared questions listed below. Work through them in order.
+
+Behavioural rules:
+- Ask one question at a time from the list. Do not add extra questions beyond what is listed.
+- Do NOT praise every answer with filler phrases like "Great!", "That's wonderful!", or "Excellent!" — only acknowledge when the answer genuinely warrants it.
+- If the answer is vague, too short, or unconvincing, ask one focused follow-up before moving on. Examples: "Can you give a specific example?", "What was the actual outcome?", "How did you handle that exactly?"
+- If the candidate rambles or goes off-topic, interrupt and redirect: "Let's stay focused — what was the result?", "I'll stop you there. The question was about X."
+- If the candidate goes silent, says "I don't know", or gives a non-answer, briefly acknowledge and move to the next question: "Alright, let's move on."
+- Never provide hints, tips, or coaching mid-interview.
+- Keep your own responses short and direct.
+- If they speak Hindi or Marathi, say once: "Please respond in English for this interview."
+- After all ${questions.length} questions are covered (including any follow-ups), close the interview with exactly this phrase: "The interview is now complete."
+
+Questions to ask (in order):
+${questionList}`;
+        }
+      } catch (err) {
+        console.error('Failed to decode interview setup from WS URL, using default prompt:', err.message);
+      }
+    }
+  }
   
   let openaiWs = null;
   let isConnected = false;
@@ -173,7 +273,7 @@ wss.on('connection', (clientWs, req) => {
         type: 'session.update',
         session: {
           modalities: ['text', 'audio'],
-          instructions: SYSTEM_PROMPTS[mode],
+          instructions: effectivePrompt,
           voice: 'alloy',
           input_audio_format: 'pcm16',
           output_audio_format: 'pcm16',

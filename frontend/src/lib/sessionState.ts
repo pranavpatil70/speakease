@@ -132,3 +132,44 @@ export function clearFeedback(): void {
     sessionStorage.removeItem(FEEDBACK_KEY);
   }
 }
+
+// ─── Interview Setup ───────────────────────────────────────────────────────────
+// Stores field/level/questions chosen on the setup page before an interview session
+
+export type ExperienceLevel = 'fresher' | 'junior' | 'mid' | 'senior';
+export type DifficultyLevel = 'easy' | 'medium' | 'hard';
+export type QuestionCount = 5 | 8 | 12;
+
+export interface InterviewSetup {
+  field: string;
+  experience: ExperienceLevel;
+  difficulty: DifficultyLevel;
+  questionCount: QuestionCount;
+  questions: string[];
+  generatedAt: number;
+}
+
+const SETUP_KEY = 'speakease_interview_setup';
+
+export function storeInterviewSetup(setup: InterviewSetup): void {
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(SETUP_KEY, JSON.stringify(setup));
+  }
+}
+
+export function getInterviewSetup(): InterviewSetup | null {
+  if (typeof window === 'undefined') return null;
+  const stored = sessionStorage.getItem(SETUP_KEY);
+  if (!stored) return null;
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return null;
+  }
+}
+
+export function clearInterviewSetup(): void {
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem(SETUP_KEY);
+  }
+}

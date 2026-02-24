@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { getProgress } from '@/lib/progressState';
 
 /**
  * Welcome Screen
@@ -8,6 +10,11 @@ import { useRouter } from 'next/navigation';
  */
 export default function WelcomePage() {
   const router = useRouter();
+  const [streak, setStreak] = useState(0);
+
+  useEffect(() => {
+    setStreak(getProgress().streak.current);
+  }, []);
 
   const handleStart = () => {
     router.push('/mode-select');
@@ -33,6 +40,14 @@ export default function WelcomePage() {
           </svg>
         </div>
       </div>
+
+      {/* Streak badge — only shown after at least one practice session */}
+      {streak > 0 && (
+        <div className="flex items-center gap-2 bg-warm-100 border border-warm-300 rounded-full px-4 py-2 mb-4 animate-fade-in">
+          <span role="img" aria-label="fire">🔥</span>
+          <span className="text-warm-800 font-semibold text-sm">{streak}-day streak</span>
+        </div>
+      )}
 
       {/* Title */}
       <h1 className="text-4xl md:text-5xl font-bold text-gray-800 text-center mb-4 animate-fade-in">
@@ -66,6 +81,17 @@ export default function WelcomePage() {
       <p className="text-sm text-gray-400 mt-16 text-center animate-fade-in" style={{ animationDelay: '0.4s' }}>
         No login required • Your practice stays private
       </p>
+
+      {/* Progress shortcut for returning users */}
+      {streak > 0 && (
+        <button
+          onClick={() => router.push('/progress')}
+          className="mt-3 text-sm text-primary-500 hover:text-primary-700 underline underline-offset-2 transition-colors animate-fade-in"
+          style={{ animationDelay: '0.5s' }}
+        >
+          View my progress
+        </button>
+      )}
     </div>
   );
 }

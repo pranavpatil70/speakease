@@ -15,11 +15,11 @@ interface MicButtonProps {
  * Push-to-talk microphone button
  * Big, prominent, and easy to use
  */
-export function MicButton({ 
-  isRecording, 
-  isDisabled = false, 
+export function MicButton({
+  isRecording,
+  isDisabled = false,
   isAISpeaking = false,
-  onPress, 
+  onPress,
   onRelease,
   size = 'large'
 }: MicButtonProps) {
@@ -38,8 +38,32 @@ export function MicButton({
     }
   }, [isPressed, onRelease]);
 
-  const sizeClasses = size === 'large' 
-    ? 'w-28 h-28 md:w-32 md:h-32' 
+  // Touch handlers call preventDefault to stop the browser from synthesizing
+  // mouse events (onMouseDown/onMouseUp) after touch events fire.
+  // Without this, a tap fires: touchstart → touchend → mousedown → mouseup,
+  // causing startRecording() to be called twice.
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    handlePressStart();
+  }, [handlePressStart]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    handlePressEnd();
+  }, [handlePressEnd]);
+
+  // Called when a touch is cancelled (e.g. incoming phone call, system gesture)
+  // Must stop recording so it doesn't get stuck in recording state
+  const handleTouchCancel = useCallback((e: React.TouchEvent) => {
+    e.preventDefault();
+    if (isPressed) {
+      setIsPressed(false);
+      onRelease();
+    }
+  }, [isPressed, onRelease]);
+
+  const sizeClasses = size === 'large'
+    ? 'w-28 h-28 md:w-32 md:h-32'
     : 'w-20 h-20 md:w-24 md:h-24';
 
   const iconSize = size === 'large' ? 'w-12 h-12' : 'w-8 h-8';
@@ -49,9 +73,9 @@ export function MicButton({
       {/* Pulse rings when recording */}
       {isRecording && (
         <>
-          <div className="absolute rounded-full bg-red-400/30 pulse-ring" 
+          <div className="absolute rounded-full bg-red-400/30 pulse-ring"
                style={{ width: '150%', height: '150%' }} />
-          <div className="absolute rounded-full bg-red-400/20 pulse-ring" 
+          <div className="absolute rounded-full bg-red-400/20 pulse-ring"
                style={{ width: '180%', height: '180%', animationDelay: '0.3s' }} />
         </>
       )}
@@ -66,8 +90,9 @@ export function MicButton({
         onMouseDown={handlePressStart}
         onMouseUp={handlePressEnd}
         onMouseLeave={handlePressEnd}
-        onTouchStart={handlePressStart}
-        onTouchEnd={handlePressEnd}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchCancel}
         disabled={isDisabled}
         className={`
           ${sizeClasses}
@@ -75,10 +100,11 @@ export function MicButton({
           flex items-center justify-center
           transition-all duration-200
           focus:outline-none focus:ring-4
-          ${isDisabled 
-            ? 'bg-gray-300 cursor-not-allowed' 
-            : isRecording 
-              ? 'bg-red-500 shadow-lg shadow-red-500/50 scale-110' 
+          select-none touch-none
+          ${isDisabled
+            ? 'bg-gray-300 cursor-not-allowed'
+            : isRecording
+              ? 'bg-red-500 shadow-lg shadow-red-500/50 scale-110'
               : isAISpeaking
                 ? 'bg-primary-400 cursor-wait'
                 : 'bg-primary-500 hover:bg-primary-600 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95'
@@ -95,17 +121,17 @@ export function MicButton({
           </div>
         ) : (
           // Microphone icon
-          <svg 
-            className={`${iconSize} text-white`} 
-            fill="none" 
-            stroke="currentColor" 
+          <svg
+            className={`${iconSize} text-white`}
+            fill="none"
+            stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              strokeWidth={2} 
-              d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" 
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
             />
           </svg>
         )}
@@ -113,3 +139,4 @@ export function MicButton({
     </div>
   );
 }
+

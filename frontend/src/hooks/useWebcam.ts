@@ -45,7 +45,17 @@ export function useWebcam(options: UseWebcamOptions = {}) {
       });
 
       videoElement.srcObject = stream;
-      await videoElement.play();
+
+      // play() can throw AbortError if srcObject changes before it resolves
+      // This is a benign race condition in some browsers — the video will still render
+      try {
+        await videoElement.play();
+      } catch (playErr) {
+        if ((playErr as Error).name !== 'AbortError') {
+          throw playErr;
+        }
+        // AbortError is safe to ignore — the stream is attached and will play
+      }
 
       videoRef.current = videoElement;
       streamRef.current = stream;
@@ -107,7 +117,7 @@ export function useWebcam(options: UseWebcamOptions = {}) {
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
     if (!ctx) return null;
 

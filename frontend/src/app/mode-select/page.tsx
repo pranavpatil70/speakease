@@ -64,8 +64,8 @@ export default function ModeSelectPage() {
     },
     {
       id: 'interview',
-      title: 'Interview Mode',
-      description: 'Practice with a simulated HR interview. Get feedback on your answers and body language.',
+      title: 'Interview Prep',
+      description: 'Set your field, level and difficulty. AI generates tailored questions just for you, then gives you real-time practice and feedback.',
       color: 'bg-gradient-to-br from-warm-50 to-warm-100 hover:from-warm-100 hover:to-warm-200',
       icon: (
         <svg className="w-7 h-7 text-warm-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -107,7 +107,7 @@ export default function ModeSelectPage() {
             description={mode.description}
             icon={mode.icon}
             color={mode.color}
-            onClick={() => router.push(`/${mode.id}`)}
+            onClick={() => router.push(mode.id === 'interview' ? '/interview-setup' : `/${mode.id}`)}
             delay={`${index * 0.1}s`}
           />
         ))}

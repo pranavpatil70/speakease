@@ -13,6 +13,12 @@ export interface WebSocketMessage {
 
 interface UseRealtimeWebSocketOptions {
   mode: 'casual' | 'office' | 'interview';
+  interviewSetup?: {
+    field: string;
+    experience: string;
+    difficulty: string;
+    questions: string[];
+  };
   onAudioDelta?: (delta: string) => void;
   onAudioDone?: () => void;
   onTranscriptDelta?: (delta: string) => void;
@@ -45,6 +51,11 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions) {
   const callbacksRef = useRef(options);
   callbacksRef.current = options;
 
+  // Store interviewSetup in a ref so connect() always gets the latest value
+  // without needing it in the dependency array (avoids unnecessary reconnects)
+  const interviewSetupRef = useRef(options.interviewSetup);
+  interviewSetupRef.current = options.interviewSetup;
+
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
@@ -53,7 +64,14 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions) {
     setStatus('connecting');
 
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
-    const ws = new WebSocket(`${wsUrl}?mode=${mode}`);
+    let queryString = `mode=${mode}`;
+
+    if (mode === 'interview' && interviewSetupRef.current?.questions?.length) {
+      const encoded = btoa(JSON.stringify(interviewSetupRef.current));
+      queryString += `&q=${encoded}`;
+    }
+
+    const ws = new WebSocket(`${wsUrl}?${queryString}`);
 
     ws.onopen = () => {
       console.log('WebSocket connected');

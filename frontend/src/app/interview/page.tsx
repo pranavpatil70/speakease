@@ -4,7 +4,7 @@ import { useEffect, useCallback, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { MicButton, ConnectionStatusBadge, LoadingOverlay } from '@/components';
 import { useRealtimeWebSocket, useAudioRecorder, useAudioPlayer, useWebcam } from '@/hooks';
-import { startSession, endSession, updateSession, storeFeedback } from '@/lib/sessionState';
+import { startSession, endSession, updateSession, storeFeedback, getInterviewSetup, type InterviewSetup } from '@/lib/sessionState';
 
 /**
  * Interview Mode
@@ -18,6 +18,11 @@ export default function InterviewPage() {
   const [transcript, setTranscript] = useState('');
   const [aiTranscript, setAITranscript] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [interviewSetup, setInterviewSetup] = useState<InterviewSetup | null>(null);
+
+  // Track when recording started — used to guard against committing < 150ms of audio,
+  // which causes "buffer too small" errors on the OpenAI Realtime API side
+  const recordingStartRef = useRef<number>(0);
 
   // Audio player for AI responses
   const { queueAudio, initAudioContext } = useAudioPlayer();
@@ -36,6 +41,7 @@ export default function InterviewPage() {
     endInterview,
   } = useRealtimeWebSocket({
     mode: 'interview',
+    interviewSetup: interviewSetup ?? undefined,
     onAudioDelta: (delta) => {
       queueAudio(delta);
     },
@@ -174,8 +180,9 @@ export default function InterviewPage() {
   // Handle mic press
   const handleMicPress = useCallback(async () => {
     if (status !== 'connected' || isAISpeaking) return;
-    
+
     try {
+      recordingStartRef.current = Date.now();
       await startRecording();
     } catch (err) {
       console.error('Failed to start recording:', err);
@@ -186,13 +193,21 @@ export default function InterviewPage() {
   const handleMicRelease = useCallback(() => {
     if (isRecording) {
       stopRecording();
-      commitAudio();
+
+      // OpenAI Realtime API requires at least 100ms of audio in the buffer.
+      // Guard against very quick taps (< 150ms) which cause "buffer too small" errors.
+      const recordingDuration = Date.now() - recordingStartRef.current;
+      if (recordingDuration >= 150) {
+        commitAudio();
+      }
+
       setAITranscript('');
     }
   }, [isRecording, stopRecording, commitAudio]);
 
-  // Auto-setup on mount
+  // Auto-setup on mount: read interview setup + start camera
   useEffect(() => {
+    setInterviewSetup(getInterviewSetup());
     handleSetup();
     return () => {
       stopCamera();
@@ -213,7 +228,7 @@ export default function InterviewPage() {
           onClick={() => {
             stopCamera();
             disconnect();
-            router.push('/mode-select');
+            router.push('/interview-setup');
           }}
           className="flex items-center gap-1 text-gray-300 hover:text-white transition-colors"
         >

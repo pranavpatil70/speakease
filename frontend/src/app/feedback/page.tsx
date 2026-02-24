@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getFeedback, clearFeedback, clearSession, type FeedbackData } from '@/lib/sessionState';
+import { getFeedback, clearFeedback, clearSession, clearInterviewSetup, getInterviewSetup, type FeedbackData } from '@/lib/sessionState';
+import { saveSession } from '@/lib/progressState';
 
 interface ScoreBarProps {
   label: string;
@@ -50,6 +51,7 @@ export default function FeedbackPage() {
   const router = useRouter();
   const [feedback, setFeedback] = useState<FeedbackData | null>(null);
   const [showTips, setShowTips] = useState(false);
+  const [streakMessage, setStreakMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const data = getFeedback();
@@ -59,21 +61,48 @@ export default function FeedbackPage() {
       return;
     }
     setFeedback(data);
-    
+
     // Show tips after a delay
     setTimeout(() => setShowTips(true), 1500);
+
+    // Save session to progress tracking (only for interview mode with setup data)
+    const setup = getInterviewSetup();
+    if (setup) {
+      const result = saveSession({
+        date: new Date().toISOString(),
+        field: setup.field,
+        experience: setup.experience,
+        difficulty: setup.difficulty,
+        confidenceScore: data.confidenceScore,
+        duration: data.duration,
+        questionCount: setup.questionCount,
+      });
+
+      if (result.streakUpdated) {
+        setStreakMessage(`${result.newStreakCount}-day streak! Keep it up!`);
+      }
+    }
   }, [router]);
 
   const handlePracticeAgain = () => {
     clearFeedback();
     clearSession();
-    router.push('/interview');
+    clearInterviewSetup();
+    router.push('/interview-setup');
   };
 
   const handleGoHome = () => {
     clearFeedback();
     clearSession();
+    clearInterviewSetup();
     router.push('/');
+  };
+
+  const handleViewProgress = () => {
+    clearFeedback();
+    clearSession();
+    clearInterviewSetup();
+    router.push('/progress');
   };
 
   if (!feedback) {
@@ -184,19 +213,36 @@ export default function FeedbackPage() {
 
       {/* Action Buttons */}
       <div className="max-w-md mx-auto flex flex-col gap-3 animate-fade-in" style={{ animationDelay: '0.4s' }}>
+        {/* Streak toast */}
+        {streakMessage && (
+          <div className="flex items-center gap-3 bg-warm-50 border border-warm-200 rounded-2xl p-4 animate-fade-in">
+            <span className="text-2xl" role="img" aria-label="fire">🔥</span>
+            <p className="text-warm-800 font-medium text-sm">{streakMessage}</p>
+          </div>
+        )}
+
         <button
           onClick={handlePracticeAgain}
-          className="w-full bg-primary-500 hover:bg-primary-600 text-white text-lg font-semibold 
-                     py-4 rounded-full shadow-lg hover:shadow-xl 
+          className="w-full bg-primary-500 hover:bg-primary-600 text-white text-lg font-semibold
+                     py-4 rounded-full shadow-lg hover:shadow-xl
                      transform hover:scale-102 transition-all duration-300"
         >
           Practice Again
         </button>
-        
+
+        <button
+          onClick={handleViewProgress}
+          className="w-full bg-sage-100 hover:bg-sage-200 text-sage-800 text-lg font-semibold
+                     py-4 rounded-full border border-sage-300
+                     transition-all duration-300"
+        >
+          View My Progress
+        </button>
+
         <button
           onClick={handleGoHome}
-          className="w-full bg-white hover:bg-gray-50 text-gray-700 text-lg font-semibold 
-                     py-4 rounded-full border border-gray-200 
+          className="w-full bg-white hover:bg-gray-50 text-gray-700 text-lg font-semibold
+                     py-4 rounded-full border border-gray-200
                      hover:border-gray-300 transition-all duration-300"
         >
           Back to Home
