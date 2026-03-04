@@ -22,6 +22,11 @@ const OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-4o-realt
 app.use(cors());
 app.use(express.json());
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ service: 'SpeakEase API', status: 'running' });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
