@@ -1,20 +1,21 @@
 {
   "name": "speakease-backend",
   "version": "1.0.0",
-  "description": "Backend server for SpeakEase English practice app",
+  "description": "SpeakEase backend API server",
   "main": "src/server.js",
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js"
   },
-  "engines": {
-    "node": ">=18.0.0"
-  },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
+    "groq-sdk": "^0.3.2",
     "ws": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
