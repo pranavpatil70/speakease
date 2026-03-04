@@ -133,7 +133,7 @@ export default function DailyChallengePage() {
     const transcript = userTranscriptsRef.current.join(' ').trim();
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || `http://${window.location.hostname}:3001`;
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || `${window.location.protocol}//${window.location.hostname}:3001`;
       const response = await fetch(`${apiUrl}/api/analyze-interview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

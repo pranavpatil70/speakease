@@ -72,7 +72,8 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions) {
 
     setStatus('connecting');
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `ws://${window.location.hostname}:3001`;
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `${wsProtocol}//${window.location.hostname}:3001`;
     let queryString = `mode=${mode}`;
 
     // Helper to safely encode Unicode strings to base64
