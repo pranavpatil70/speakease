@@ -27,14 +27,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-// Video analysis endpoint for interview feedback
+// Analysis endpoint for interview/daily-challenge feedback
 app.post('/api/analyze-interview', (req, res) => {
-  const { frameData } = req.body;
-
-  // Simulated analysis based on frame data patterns
-  // In production, this would use computer vision ML models
-  const analysis = analyzeInterviewFrames(frameData);
-
+  const { frameData, transcript, duration } = req.body;
+  const analysis = analyzeSession(frameData, transcript || '', duration || 0);
   res.json(analysis);
 });
 
@@ -102,71 +98,130 @@ Example format: ["Question one?","Question two?","Question three?"]`;
 });
 
 /**
- * Analyze interview video frames for body language feedback
- * This simulates CV analysis - in production use TensorFlow.js or similar
+ * Analyze a session honestly using real transcript and frame data.
+ * Only scores metrics we can actually compute — no random padding.
  */
-function analyzeInterviewFrames(frameData) {
-  // Generate realistic scores based on frame count and variance
-  const frameCount = frameData?.frameCount || 0;
-  const hasFrames = frameCount > 10;
-  
-  // Simulate analysis with slight randomization for realism
-  const baseScore = hasFrames ? 3.5 : 3;
-  const variance = () => (Math.random() - 0.5) * 1.5;
-  
+function analyzeSession(frameData, transcript, durationMs) {
   const clamp = (val, min, max) => Math.min(max, Math.max(min, val));
-  
-  const eyeContact = clamp(Math.round((baseScore + variance()) * 10) / 10, 2, 5);
-  const headStability = clamp(Math.round((baseScore + 0.3 + variance()) * 10) / 10, 2, 5);
-  const posture = clamp(Math.round((baseScore + 0.2 + variance()) * 10) / 10, 2, 5);
-  const handMovement = clamp(Math.round((baseScore + variance()) * 10) / 10, 2, 5);
-  
-  // Speaking analysis from audio metadata if available
-  const speakingPace = clamp(Math.round((baseScore + 0.1 + variance()) * 10) / 10, 2, 5);
-  const fillerWords = clamp(Math.round((baseScore - 0.2 + variance()) * 10) / 10, 2, 5);
-  
-  // Calculate overall confidence score (1-10)
-  const avgScore = (eyeContact + headStability + posture + handMovement + speakingPace + fillerWords) / 6;
-  const confidenceScore = clamp(Math.round(avgScore * 2 * 10) / 10, 4, 10);
-  
-  // Generate improvement tips based on lowest scores
-  const scores = [
-    { name: 'eye_contact', score: eyeContact, tip: 'Try to look directly at the camera more often to simulate eye contact with the interviewer.' },
-    { name: 'head_stability', score: headStability, tip: 'Keep your head steady and avoid excessive nodding or tilting.' },
-    { name: 'posture', score: posture, tip: 'Sit up straight with your shoulders back to project confidence.' },
-    { name: 'hand_movement', score: handMovement, tip: 'Use natural hand gestures but avoid fidgeting or excessive movements.' },
-    { name: 'speaking_pace', score: speakingPace, tip: 'Maintain a steady speaking pace - not too fast, not too slow.' },
-    { name: 'filler_words', score: fillerWords, tip: 'Practice reducing filler words like "um", "uh", "like", and "you know".' }
-  ];
-  
-  // Sort by score and get top 3 areas for improvement
-  const sortedScores = [...scores].sort((a, b) => a.score - b.score);
-  const improvementTips = sortedScores.slice(0, 3).map(s => s.tip);
-  
+
+  const words = transcript.trim().split(/\s+/).filter(Boolean);
+  const wordCount = words.length;
+  const hasTranscript = wordCount > 5;
+
+  // ── No speech detected ──────────────────────────────────────────────────────
+  if (!hasTranscript) {
+    return {
+      scores: {},
+      confidenceScore: 0,
+      improvementTips: [
+        'No speech was detected in this session. Make sure your microphone is unmuted and speak clearly during the session.',
+      ],
+      summary: 'No speech was detected. Unmute your mic and try again — the AI listens automatically.',
+      noSpeechDetected: true,
+    };
+  }
+
+  const scores = {};
+
+  // ── Filler word analysis ────────────────────────────────────────────────────
+  // Counts common spoken fillers in the transcript
+  const fillerPattern = /\b(um+|uh+|like|you know|basically|literally|right\b|so\b|actually|kind of|sort of|i mean|you see)\b/gi;
+  const fillerMatches = transcript.match(fillerPattern) || [];
+  const fillerCount = fillerMatches.length;
+  const fillerRate = fillerCount / wordCount; // fillers per word
+
+  // Score: 0% fillers → 5.0, ≥12% fillers → 2.0 (linear interpolation)
+  const fillerScore = clamp(+(5.0 - fillerRate * 25).toFixed(1), 2.0, 5.0);
+  scores.fillerWords = fillerScore;
+
+  // ── Speaking pace (words per minute) ───────────────────────────────────────
+  const durationMinutes = durationMs / 60000;
+  const wpm = durationMinutes > 0 ? wordCount / durationMinutes : 0;
+
+  // Ideal interview pace: 120-160 WPM. Penalty for being far outside that range.
+  let paceScore;
+  if (wpm >= 120 && wpm <= 160) paceScore = 5.0;
+  else if ((wpm >= 100 && wpm < 120) || (wpm > 160 && wpm <= 185)) paceScore = 4.0;
+  else if ((wpm >= 80 && wpm < 100) || (wpm > 185 && wpm <= 210)) paceScore = 3.0;
+  else paceScore = 2.0;
+  scores.speakingPace = paceScore;
+
+  // ── Camera-based scores (interview mode only) ───────────────────────────────
+  const frameCount = frameData?.frameCount || 0;
+  if (frameCount > 10) {
+    const faceDetectedRatio = frameData.faceDetectedRatio ?? 0;
+
+    // Eye contact proxy: ratio of frames where face was detected, centered in frame
+    // 100% face detected → 5.0, 0% → 2.0
+    const eyeScore = clamp(+(2 + faceDetectedRatio * 3).toFixed(1), 2.0, 5.0);
+    scores.eyeContact = eyeScore;
+
+    // Head stability proxy: how centered the face X position is
+    // avgFaceX of 0.5 = perfectly centered → 5.0; deviation → lower score
+    const avgFaceX = frameData.averageFaceX ?? 0.5;
+    const deviation = Math.abs(avgFaceX - 0.5); // 0 = centered, 0.5 = edge
+    const headScore = clamp(+(5 - deviation * 8).toFixed(1), 2.0, 5.0);
+    scores.headStability = headScore;
+  }
+
+  // ── Overall confidence score ────────────────────────────────────────────────
+  const scoreValues = Object.values(scores);
+  const avgScore = scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length;
+  const confidenceScore = clamp(+(avgScore * 2).toFixed(1), 2.0, 10.0);
+
+  // ── Honest improvement tips ─────────────────────────────────────────────────
+  const tips = [];
+
+  if (fillerScore < 3.5) {
+    const pct = Math.round(fillerRate * 100);
+    tips.push(`You used ${fillerCount} filler word${fillerCount === 1 ? '' : 's'} (${pct}% of words spoken). Practice pausing silently instead of saying "um" or "uh" — silence sounds more confident than a filler.`);
+  }
+
+  if (paceScore < 3.5) {
+    if (wpm > 0 && wpm < 100) {
+      tips.push(`Your speaking pace was slow (~${Math.round(wpm)} WPM). Aim for 120-160 words per minute — it projects clarity and confidence without sounding rushed.`);
+    } else if (wpm > 185) {
+      tips.push(`Your speaking pace was fast (~${Math.round(wpm)} WPM). Slow down to 120-160 WPM so interviewers can follow and absorb your answers.`);
+    }
+  }
+
+  if (scores.eyeContact !== undefined && scores.eyeContact < 3.5) {
+    tips.push('Keep your face visible and look toward the camera more often — it signals engagement and confidence to the interviewer.');
+  }
+
+  if (scores.headStability !== undefined && scores.headStability < 3.5) {
+    tips.push('Try to stay centered in the frame. Excessive movement or being off-center can be distracting in a video interview.');
+  }
+
+  if (tips.length === 0) {
+    // All metrics are solid — give a constructive tip on content
+    if (wordCount < 60) {
+      tips.push('Your delivery was clean, but your answers were brief. In interviews, aim for 1-2 minute responses with a clear structure: Situation → Action → Result.');
+    } else {
+      tips.push('Solid delivery! To stand out further, make sure each answer ends with a concrete result or takeaway that shows your impact.');
+    }
+  }
+
   return {
-    scores: {
-      eyeContact,
-      headStability,
-      posture,
-      handMovement,
-      speakingPace,
-      fillerWords
-    },
+    scores,
     confidenceScore,
-    improvementTips,
-    summary: generateSummary(confidenceScore)
+    improvementTips: tips.slice(0, 3),
+    summary: generateSummary(confidenceScore, wordCount),
   };
 }
 
-function generateSummary(score) {
-  if (score >= 8) {
-    return "Excellent performance! You presented yourself confidently and professionally.";
-  } else if (score >= 6) {
-    return "Good job! With a bit more practice, you'll ace your interviews.";
-  } else if (score >= 4) {
-    return "You're on the right track. Focus on the tips below to improve.";
+function generateSummary(score, wordCount) {
+  if (wordCount < 30) {
+    return 'Your answers were very brief. Try to elaborate more — interviewers want to understand how you think and what you did.';
+  }
+  if (score >= 8.5) {
+    return 'Strong performance. Your delivery was clear, well-paced, and minimal on filler words.';
+  } else if (score >= 6.5) {
+    return 'Good session. A few small areas to polish — check the tips below.';
+  } else if (score >= 4.5) {
+    return 'You\'re building the habit. Focus on the areas flagged below and you\'ll improve quickly.';
   } else {
-    return "Keep practicing! Every interview makes you better.";
+    return 'Keep practicing — each session sharpens your delivery. Focus on one tip at a time.';
   }
 }
 
@@ -204,7 +259,9 @@ Behavioural rules:
 - Keep your own responses short and direct — you are asking questions, not giving feedback.
 - If they speak Hindi or Marathi, say once: "Please respond in English for this interview."
 - Cover: self-introduction, strengths and weaknesses (push for specifics), motivation for the role, a situational or behavioural scenario, and career goals.
-- End the interview naturally when all topics are covered. Close with exactly: "Thank you for your time. The interview is now complete."`
+- End the interview naturally when all topics are covered. Close with exactly: "Thank you for your time. The interview is now complete."`,
+
+  daily: `You are a speaking coach running a focused 2-3 minute confidence drill. You will receive a specific scenario and system prompt — follow it exactly. Keep the session short: one focused question, one follow-up maximum, then brief honest feedback on delivery. End with exactly: "The challenge is complete." Do not praise every response with filler phrases. React like a real coach or interviewer. If they speak Hindi or Marathi, ask them to answer in English.`
 };
 
 // Handle WebSocket connections
@@ -251,9 +308,42 @@ ${questionList}`;
       }
     }
   }
+
+  if (mode === 'daily') {
+    const encodedScenario = url.searchParams.get('q');
+    if (encodedScenario) {
+      try {
+        const { systemPrompt } = JSON.parse(Buffer.from(encodedScenario, 'base64').toString('utf-8'));
+        if (systemPrompt) {
+          effectivePrompt = systemPrompt;
+        }
+      } catch (err) {
+        console.error('Failed to decode daily scenario from WS URL, using default daily prompt:', err.message);
+      }
+    }
+  }
   
   let openaiWs = null;
   let isConnected = false;
+  let responseInProgress = false;
+  let currentResponseId = null;
+  
+  // Helper to safely create a new response, canceling any in-progress one first
+  const createResponse = (options = {}) => {
+    if (openaiWs?.readyState !== WebSocket.OPEN) return;
+    
+    if (responseInProgress && currentResponseId) {
+      console.log('Canceling in-progress response:', currentResponseId);
+      openaiWs.send(JSON.stringify({
+        type: 'response.cancel'
+      }));
+    }
+    
+    openaiWs.send(JSON.stringify({
+      type: 'response.create',
+      ...options
+    }));
+  };
   
   // Connect to OpenAI Realtime API
   const connectToOpenAI = () => {
@@ -359,12 +449,22 @@ ${questionList}`;
             break;
             
           case 'response.created':
-            console.log('Response created');
+            console.log('Response created:', message.response?.id);
+            responseInProgress = true;
+            currentResponseId = message.response?.id || null;
             break;
             
           case 'response.done':
-            console.log('Response complete');
+            console.log('Response complete:', message.response?.id);
+            responseInProgress = false;
+            currentResponseId = null;
             clientWs.send(JSON.stringify({ type: 'response.complete' }));
+            break;
+            
+          case 'response.cancelled':
+            console.log('Response cancelled:', message.response_id);
+            responseInProgress = false;
+            currentResponseId = null;
             break;
             
           case 'error':
@@ -430,40 +530,35 @@ ${questionList}`;
           break;
           
         case 'audio.commit':
-          // Commit audio buffer and request response
+          // Commit audio buffer - server_vad will auto-create response
           console.log('Committing audio buffer');
           if (openaiWs.readyState === WebSocket.OPEN) {
             openaiWs.send(JSON.stringify({
               type: 'input_audio_buffer.commit'
             }));
-            // Note: With server_vad, response is auto-created after speech ends
-            // But we also send explicit create for manual commit scenarios
-            openaiWs.send(JSON.stringify({
-              type: 'response.create'
-            }));
+            // Note: With server_vad enabled, response is auto-created after speech ends
+            // Do NOT send explicit response.create here to avoid conflict
           }
           break;
           
         case 'conversation.start':
           // Start the conversation with a greeting
-          openaiWs.send(JSON.stringify({
-            type: 'response.create',
+          createResponse({
             response: {
               modalities: ['text', 'audio'],
               instructions: 'Start with a brief, warm greeting appropriate for the mode.'
             }
-          }));
+          });
           break;
           
         case 'interview.end':
           // Signal end of interview
-          openaiWs.send(JSON.stringify({
-            type: 'response.create',
+          createResponse({
             response: {
               modalities: ['text', 'audio'],
               instructions: 'Thank the candidate and conclude the interview professionally.'
             }
-          }));
+          });
           break;
       }
     } catch (err) {

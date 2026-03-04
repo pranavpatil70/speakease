@@ -25,7 +25,6 @@ export default function OfficePage() {
     connect,
     disconnect,
     sendAudio,
-    commitAudio,
   } = useRealtimeWebSocket({
     mode: 'office',
     onAudioDelta: (delta) => {
@@ -38,7 +37,6 @@ export default function OfficePage() {
       setAITranscript(text);
     },
     onUserTranscript: (text) => {
-      console.log('User said:', text);
       setTranscript(text);
     },
     onError: (message) => {
@@ -72,25 +70,21 @@ export default function OfficePage() {
     router.push('/mode-select');
   }, [disconnect, stopRecording, router]);
 
-  // Handle mic press
-  const handleMicPress = useCallback(async () => {
-    if (status !== 'connected' || isAISpeaking) return;
-    
-    try {
-      await startRecording();
-    } catch (err) {
-      console.error('Failed to start recording:', err);
-    }
-  }, [status, isAISpeaking, startRecording]);
+  // Toggle mic on/off — VAD handles speech detection automatically
+  const handleMicToggle = useCallback(async () => {
+    if (status !== 'connected') return;
 
-  // Handle mic release
-  const handleMicRelease = useCallback(() => {
     if (isRecording) {
       stopRecording();
-      commitAudio();
-      setAITranscript('');
+    } else {
+      try {
+        setTranscript('');
+        await startRecording();
+      } catch (err) {
+        console.error('Failed to start recording:', err);
+      }
     }
-  }, [isRecording, stopRecording, commitAudio]);
+  }, [status, isRecording, startRecording, stopRecording]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -139,14 +133,14 @@ export default function OfficePage() {
               </div>
               <h2 className="text-2xl font-bold text-gray-800 mb-2">Professional Practice</h2>
               <p className="text-gray-500 max-w-sm mb-6">
-                Practice workplace English with professional scenarios. 
+                Practice workplace English with professional scenarios.
                 Learn phrases that sound polished and confident.
               </p>
 
               {/* Scenario chips */}
               <div className="flex flex-wrap justify-center gap-2 mb-8">
                 {scenarios.map((scenario) => (
-                  <span 
+                  <span
                     key={scenario}
                     className="px-3 py-1 bg-sage-100 text-sage-700 text-sm rounded-full"
                   >
@@ -158,8 +152,8 @@ export default function OfficePage() {
 
             <button
               onClick={handleStartSession}
-              className="bg-sage-600 hover:bg-sage-700 text-white text-lg font-semibold 
-                         py-4 px-10 rounded-full shadow-lg hover:shadow-xl 
+              className="bg-sage-600 hover:bg-sage-700 text-white text-lg font-semibold
+                         py-4 px-10 rounded-full shadow-lg hover:shadow-xl
                          transform hover:scale-105 transition-all duration-300"
             >
               Start Practice
@@ -175,6 +169,14 @@ export default function OfficePage() {
             {/* AI Speaking Indicator */}
             <PulseIndicator isActive={isAISpeaking} label="Work Coach" />
 
+            {/* User Transcript */}
+            {transcript && (
+              <div className="w-full bg-sage-50 rounded-2xl p-4 text-center animate-slide-up">
+                <p className="text-xs text-gray-500 mb-1">You said:</p>
+                <p className="text-gray-700 leading-relaxed">{transcript}</p>
+              </div>
+            )}
+
             {/* AI Transcript */}
             {aiTranscript && (
               <div className="w-full bg-white/50 rounded-2xl p-4 text-center animate-slide-up">
@@ -185,24 +187,25 @@ export default function OfficePage() {
             {/* Spacer */}
             <div className="flex-1" />
 
-            {/* Recording status */}
+            {/* Status text */}
             <div className="text-center mb-4">
-              <p className={`text-sm ${isRecording ? 'text-sage-600' : 'text-gray-400'}`}>
-                {isRecording ? 'Listening...' : isAISpeaking ? 'Coach is speaking...' : 'Hold the mic to speak'}
+              <p className={`text-sm ${isRecording ? 'text-green-600' : 'text-gray-400'}`}>
+                {isRecording
+                  ? isAISpeaking ? 'Coach is speaking...' : 'Listening — speak naturally'
+                  : 'Microphone muted'}
               </p>
             </div>
 
-            {/* Mic Button */}
+            {/* Mic Toggle Button */}
             <MicButton
-              isRecording={isRecording}
+              isMicOn={isRecording}
               isDisabled={status !== 'connected'}
               isAISpeaking={isAISpeaking}
-              onPress={handleMicPress}
-              onRelease={handleMicRelease}
+              onToggle={handleMicToggle}
             />
 
             <p className="text-xs text-gray-400 text-center mt-4">
-              Speak naturally—the AI will suggest professional alternatives
+              {isRecording ? 'Click mic to mute' : 'Click mic to unmute and speak'}
             </p>
           </div>
         )}

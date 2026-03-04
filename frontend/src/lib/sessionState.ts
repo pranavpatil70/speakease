@@ -98,18 +98,23 @@ export function clearSession(): void {
 const FEEDBACK_KEY = 'speakease_feedback';
 
 export interface FeedbackData {
-  scores: {
+  /**
+   * Only includes metrics that were actually measured.
+   * fillerWords and speakingPace: always present when speech was detected.
+   * eyeContact and headStability: only present in interview mode (camera on).
+   * Empty object when no speech was detected.
+   */
+  scores: Partial<{
+    fillerWords: number;
+    speakingPace: number;
     eyeContact: number;
     headStability: number;
-    posture: number;
-    handMovement: number;
-    speakingPace: number;
-    fillerWords: number;
-  };
+  }>;
   confidenceScore: number;
   improvementTips: string[];
   summary: string;
   duration: number;
+  noSpeechDetected?: boolean;
 }
 
 export function storeFeedback(feedback: FeedbackData): void {
@@ -171,5 +176,41 @@ export function getInterviewSetup(): InterviewSetup | null {
 export function clearInterviewSetup(): void {
   if (typeof window !== 'undefined') {
     sessionStorage.removeItem(SETUP_KEY);
+  }
+}
+
+// ─── Daily Challenge Setup ──────────────────────────────────────────────────
+// Stores the daily challenge context before entering a daily challenge session
+
+export interface DailyChallengeSetup {
+  challengeId: number;
+  title: string;
+  scenario: string;
+  systemPrompt: string;
+  date: string; // YYYY-MM-DD of challenge date
+}
+
+const DAILY_KEY = 'speakease_daily_challenge';
+
+export function storeDailyChallenge(setup: DailyChallengeSetup): void {
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(DAILY_KEY, JSON.stringify(setup));
+  }
+}
+
+export function getDailyChallenge(): DailyChallengeSetup | null {
+  if (typeof window === 'undefined') return null;
+  const stored = sessionStorage.getItem(DAILY_KEY);
+  if (!stored) return null;
+  try {
+    return JSON.parse(stored);
+  } catch {
+    return null;
+  }
+}
+
+export function clearDailyChallenge(): void {
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem(DAILY_KEY);
   }
 }

@@ -12,12 +12,17 @@ export interface WebSocketMessage {
 }
 
 interface UseRealtimeWebSocketOptions {
-  mode: 'casual' | 'office' | 'interview';
+  mode: 'casual' | 'office' | 'interview' | 'daily';
   interviewSetup?: {
     field: string;
     experience: string;
     difficulty: string;
     questions: string[];
+  };
+  dailyScenario?: {
+    challengeId: number;
+    title: string;
+    systemPrompt: string;
   };
   onAudioDelta?: (delta: string) => void;
   onAudioDone?: () => void;
@@ -56,6 +61,10 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions) {
   const interviewSetupRef = useRef(options.interviewSetup);
   interviewSetupRef.current = options.interviewSetup;
 
+  // Same pattern for daily scenario
+  const dailyScenarioRef = useRef(options.dailyScenario);
+  dailyScenarioRef.current = options.dailyScenario;
+
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
@@ -63,11 +72,21 @@ export function useRealtimeWebSocket(options: UseRealtimeWebSocketOptions) {
 
     setStatus('connecting');
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3001';
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `ws://${window.location.hostname}:3001`;
     let queryString = `mode=${mode}`;
 
+    // Helper to safely encode Unicode strings to base64
+    const safeBase64Encode = (str: string): string => {
+      return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode(parseInt(p1, 16))));
+    };
+
     if (mode === 'interview' && interviewSetupRef.current?.questions?.length) {
-      const encoded = btoa(JSON.stringify(interviewSetupRef.current));
+      const encoded = safeBase64Encode(JSON.stringify(interviewSetupRef.current));
+      queryString += `&q=${encoded}`;
+    }
+
+    if (mode === 'daily' && dailyScenarioRef.current) {
+      const encoded = safeBase64Encode(JSON.stringify(dailyScenarioRef.current));
       queryString += `&q=${encoded}`;
     }
 

@@ -13,16 +13,14 @@ import { startSession, endSession, updateSession, storeFeedback, getInterviewSet
 export default function InterviewPage() {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
-  
+
   const [stage, setStage] = useState<'setup' | 'ready' | 'active' | 'ending'>('setup');
-  const [transcript, setTranscript] = useState('');
   const [aiTranscript, setAITranscript] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [interviewSetup, setInterviewSetup] = useState<InterviewSetup | null>(null);
 
-  // Track when recording started — used to guard against committing < 150ms of audio,
-  // which causes "buffer too small" errors on the OpenAI Realtime API side
-  const recordingStartRef = useRef<number>(0);
+  // Accumulate all user speech for honest feedback analysis
+  const userTranscriptsRef = useRef<string[]>([]);
 
   // Audio player for AI responses
   const { queueAudio, initAudioContext } = useAudioPlayer();
@@ -37,7 +35,6 @@ export default function InterviewPage() {
     connect,
     disconnect,
     sendAudio,
-    commitAudio,
     endInterview,
   } = useRealtimeWebSocket({
     mode: 'interview',
@@ -51,14 +48,14 @@ export default function InterviewPage() {
     onTranscriptDone: (text) => {
       setAITranscript(text);
       // Check if interview is ending
-      if (text.toLowerCase().includes('interview is now complete') || 
+      if (text.toLowerCase().includes('interview is now complete') ||
           text.toLowerCase().includes('thank you for your time')) {
         setStage('ending');
       }
     },
     onUserTranscript: (text) => {
-      console.log('User said:', text);
-      setTranscript(text);
+      // Accumulate all user speech for feedback analysis
+      userTranscriptsRef.current.push(text);
     },
     onError: (message) => {
       console.error('WebSocket error:', message);
@@ -75,7 +72,7 @@ export default function InterviewPage() {
   // Setup camera and permissions
   const handleSetup = useCallback(async () => {
     if (!videoRef.current) return;
-    
+
     try {
       await startCamera(videoRef.current);
       setStage('ready');
@@ -91,6 +88,7 @@ export default function InterviewPage() {
     try {
       initAudioContext();
       startSession('interview');
+      userTranscriptsRef.current = [];
       connect();
       setStage('active');
     } catch (err) {
@@ -101,22 +99,22 @@ export default function InterviewPage() {
   // End interview and get feedback
   const handleEndInterview = useCallback(async () => {
     setIsAnalyzing(true);
-    
+
     // Stop recording if active
     if (isRecording) {
       stopRecording();
     }
-    
+
     // Tell AI to end the interview
     endInterview();
-    
+
     // Wait a moment for AI to respond
     await new Promise(resolve => setTimeout(resolve, 2000));
-    
+
     // End session and get frame data
     const session = endSession();
     const frameData = getFrameData();
-    
+
     // Update session with frame data
     if (session) {
       updateSession({
@@ -128,82 +126,64 @@ export default function InterviewPage() {
         },
       });
     }
-    
+
     // Calculate duration
     const duration = session ? (session.endTime || Date.now()) - session.startTime : 0;
-    
-    // Send frame data to backend for analysis
+
+    // Build an aggregated transcript from all user speech
+    const transcript = userTranscriptsRef.current.join(' ').trim();
+
+    // Send data to backend for honest analysis
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || `http://${window.location.hostname}:3001`;
       const response = await fetch(`${apiUrl}/api/analyze-interview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ frameData }),
+        body: JSON.stringify({ frameData, transcript, duration }),
       });
-      
+
       const analysis = await response.json();
-      
+
       // Store feedback with duration
       storeFeedback({ ...analysis, duration });
-      
+
     } catch (err) {
       console.error('Failed to analyze interview:', err);
-      // Store default feedback
       storeFeedback({
-        scores: {
-          eyeContact: 3,
-          headStability: 3,
-          posture: 3,
-          handMovement: 3,
-          speakingPace: 3,
-          fillerWords: 3,
-        },
-        confidenceScore: 6,
+        scores: { speakingPace: 3, fillerWords: 3 },
+        confidenceScore: 5,
         improvementTips: [
-          'Practice maintaining eye contact with the camera.',
-          'Keep your posture upright and confident.',
-          'Speak at a steady, measured pace.',
+          'Could not connect to the analysis server. Check your answers for clear structure.',
+          'Practice reducing filler words like "um", "uh", and "like".',
+          'Aim for 120-160 words per minute for a confident speaking pace.',
         ],
-        summary: 'Good practice session! Review the tips below to improve.',
+        summary: 'Analysis unavailable — keep practicing!',
         duration,
       });
     }
-    
+
     // Cleanup
     stopCamera();
     disconnect();
-    
+
     // Navigate to feedback
     router.push('/feedback');
   }, [isRecording, stopRecording, endInterview, getFrameData, stopCamera, disconnect, router]);
 
-  // Handle mic press
-  const handleMicPress = useCallback(async () => {
-    if (status !== 'connected' || isAISpeaking) return;
+  // Toggle mic on/off — VAD handles speech detection automatically
+  const handleMicToggle = useCallback(async () => {
+    if (status !== 'connected') return;
 
-    try {
-      recordingStartRef.current = Date.now();
-      await startRecording();
-    } catch (err) {
-      console.error('Failed to start recording:', err);
-    }
-  }, [status, isAISpeaking, startRecording]);
-
-  // Handle mic release
-  const handleMicRelease = useCallback(() => {
     if (isRecording) {
       stopRecording();
-
-      // OpenAI Realtime API requires at least 100ms of audio in the buffer.
-      // Guard against very quick taps (< 150ms) which cause "buffer too small" errors.
-      const recordingDuration = Date.now() - recordingStartRef.current;
-      if (recordingDuration >= 150) {
-        commitAudio();
+    } else {
+      try {
+        await startRecording();
+      } catch (err) {
+        console.error('Failed to start recording:', err);
       }
-
-      setAITranscript('');
     }
-  }, [isRecording, stopRecording, commitAudio]);
+  }, [status, isRecording, startRecording, stopRecording]);
 
   // Auto-setup on mount: read interview setup + start camera
   useEffect(() => {
@@ -253,7 +233,7 @@ export default function InterviewPage() {
             playsInline
             muted
           />
-          
+
           {/* Camera overlay */}
           {!isStreaming && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
@@ -297,8 +277,8 @@ export default function InterviewPage() {
               </p>
               <button
                 onClick={handleStartInterview}
-                className="bg-warm-600 hover:bg-warm-700 text-white text-lg font-semibold 
-                           py-3 px-8 rounded-full shadow-lg hover:shadow-xl 
+                className="bg-warm-600 hover:bg-warm-700 text-white text-lg font-semibold
+                           py-3 px-8 rounded-full shadow-lg hover:shadow-xl
                            transform hover:scale-105 transition-all duration-300"
               >
                 Begin Interview
@@ -309,8 +289,10 @@ export default function InterviewPage() {
           {stage === 'active' && (
             <div className="flex flex-col items-center gap-4 animate-fade-in">
               {/* Status text */}
-              <p className={`text-sm ${isRecording ? 'text-red-400' : 'text-gray-400'}`}>
-                {isRecording ? 'Speaking...' : isAISpeaking ? 'Listen to the question...' : 'Hold to answer'}
+              <p className={`text-sm ${isRecording ? 'text-green-400' : 'text-gray-400'}`}>
+                {isRecording
+                  ? isAISpeaking ? 'Interviewer is speaking...' : 'Mic on — listening'
+                  : 'Mic muted — click to unmute'}
               </p>
 
               {/* Controls row */}
@@ -327,13 +309,12 @@ export default function InterviewPage() {
                   </svg>
                 </button>
 
-                {/* Mic button */}
+                {/* Mic toggle button */}
                 <MicButton
-                  isRecording={isRecording}
+                  isMicOn={isRecording}
                   isDisabled={status !== 'connected'}
                   isAISpeaking={isAISpeaking}
-                  onPress={handleMicPress}
-                  onRelease={handleMicRelease}
+                  onToggle={handleMicToggle}
                   size="normal"
                 />
 
@@ -350,7 +331,7 @@ export default function InterviewPage() {
               </p>
               <button
                 onClick={handleEndInterview}
-                className="bg-primary-500 hover:bg-primary-600 text-white text-lg font-semibold 
+                className="bg-primary-500 hover:bg-primary-600 text-white text-lg font-semibold
                            py-3 px-8 rounded-full shadow-lg"
               >
                 View Feedback

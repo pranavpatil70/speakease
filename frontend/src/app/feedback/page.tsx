@@ -2,8 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getFeedback, clearFeedback, clearSession, clearInterviewSetup, getInterviewSetup, type FeedbackData } from '@/lib/sessionState';
-import { saveSession } from '@/lib/progressState';
+import {
+  getFeedback,
+  clearFeedback,
+  clearSession,
+  clearInterviewSetup,
+  getInterviewSetup,
+  getDailyChallenge,
+  clearDailyChallenge,
+  type FeedbackData,
+} from '@/lib/sessionState';
+import { saveSession, BADGES } from '@/lib/progressState';
 
 interface ScoreBarProps {
   label: string;
@@ -13,7 +22,7 @@ interface ScoreBarProps {
 
 function ScoreBar({ label, score, maxScore = 5 }: ScoreBarProps) {
   const percentage = (score / maxScore) * 100;
-  
+
   const getColor = (pct: number) => {
     if (pct >= 80) return 'bg-green-500';
     if (pct >= 60) return 'bg-primary-500';
@@ -28,7 +37,7 @@ function ScoreBar({ label, score, maxScore = 5 }: ScoreBarProps) {
         <span className="text-sm font-semibold text-gray-800">{score}/{maxScore}</span>
       </div>
       <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div 
+        <div
           className={`h-full rounded-full transition-all duration-1000 score-bar ${getColor(percentage)}`}
           style={{ width: `${percentage}%` }}
         />
@@ -44,64 +53,80 @@ function formatDuration(ms: number): string {
 }
 
 /**
- * Interview Feedback Screen
- * Shows scores and improvement tips after an interview
+ * Interview / Daily Challenge Feedback Screen
+ * Shows scores and improvement tips after a session
  */
 export default function FeedbackPage() {
   const router = useRouter();
   const [feedback, setFeedback] = useState<FeedbackData | null>(null);
   const [showTips, setShowTips] = useState(false);
   const [streakMessage, setStreakMessage] = useState<string | null>(null);
+  const [xpEarned, setXpEarned] = useState<number | null>(null);
+  const [newBadges, setNewBadges] = useState<string[]>([]);
 
   useEffect(() => {
     const data = getFeedback();
     if (!data) {
-      // No feedback data, redirect to home
       router.push('/');
       return;
     }
     setFeedback(data);
-
-    // Show tips after a delay
     setTimeout(() => setShowTips(true), 1500);
 
-    // Save session to progress tracking (only for interview mode with setup data)
-    const setup = getInterviewSetup();
-    if (setup) {
+    // Determine session type — daily challenge takes priority
+    const dailySetup = getDailyChallenge();
+    const interviewSetup = getInterviewSetup();
+
+    if (dailySetup) {
       const result = saveSession({
         date: new Date().toISOString(),
-        field: setup.field,
-        experience: setup.experience,
-        difficulty: setup.difficulty,
+        field: `Daily: ${dailySetup.title}`,
+        experience: 'daily',
+        difficulty: 'daily',
         confidenceScore: data.confidenceScore,
         duration: data.duration,
-        questionCount: setup.questionCount,
+        questionCount: 1,
+        sessionType: 'daily',
       });
-
-      if (result.streakUpdated) {
-        setStreakMessage(`${result.newStreakCount}-day streak! Keep it up!`);
-      }
+      if (result.streakUpdated) setStreakMessage(`${result.newStreakCount}-day streak! Keep it up!`);
+      setXpEarned(result.xpEarned);
+      setNewBadges(result.newBadges);
+    } else if (interviewSetup) {
+      const result = saveSession({
+        date: new Date().toISOString(),
+        field: interviewSetup.field,
+        experience: interviewSetup.experience,
+        difficulty: interviewSetup.difficulty,
+        confidenceScore: data.confidenceScore,
+        duration: data.duration,
+        questionCount: interviewSetup.questionCount,
+        sessionType: 'interview',
+      });
+      if (result.streakUpdated) setStreakMessage(`${result.newStreakCount}-day streak! Keep it up!`);
+      setXpEarned(result.xpEarned);
+      setNewBadges(result.newBadges);
     }
   }, [router]);
 
-  const handlePracticeAgain = () => {
+  const clearAll = () => {
     clearFeedback();
     clearSession();
     clearInterviewSetup();
-    router.push('/interview-setup');
+    clearDailyChallenge();
+  };
+
+  const handlePracticeAgain = () => {
+    clearAll();
+    router.push('/mode-select');
   };
 
   const handleGoHome = () => {
-    clearFeedback();
-    clearSession();
-    clearInterviewSetup();
+    clearAll();
     router.push('/');
   };
 
   const handleViewProgress = () => {
-    clearFeedback();
-    clearSession();
-    clearInterviewSetup();
+    clearAll();
     router.push('/progress');
   };
 
@@ -115,21 +140,23 @@ export default function FeedbackPage() {
 
   const { scores, confidenceScore, improvementTips, summary, duration } = feedback;
 
-  // Map score keys to display labels
   const scoreLabels: Record<string, string> = {
+    fillerWords: 'Filler Word Control',
+    speakingPace: 'Speaking Pace',
     eyeContact: 'Eye Contact',
     headStability: 'Head Stability',
-    posture: 'Posture',
-    handMovement: 'Hand Movement',
-    speakingPace: 'Speaking Pace',
-    fillerWords: 'Filler Word Control',
   };
+
+  // Only render score bars for metrics that are present and non-zero
+  const availableScores = Object.entries(scores).filter(
+    ([, value]) => typeof value === 'number' && !isNaN(value)
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-primary-50 to-white px-6 py-8">
       {/* Header */}
       <div className="text-center mb-8 animate-fade-in">
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">Interview Feedback</h1>
+        <h1 className="text-3xl font-bold text-gray-800 mb-2">Session Feedback</h1>
         <p className="text-gray-500">Duration: {formatDuration(duration)}</p>
       </div>
 
@@ -137,54 +164,58 @@ export default function FeedbackPage() {
       <div className="max-w-md mx-auto mb-8 animate-slide-up">
         <div className="bg-white rounded-2xl shadow-lg p-6 text-center">
           <h2 className="text-lg font-medium text-gray-600 mb-4">Overall Confidence</h2>
-          
-          {/* Big score circle */}
-          <div className="relative w-32 h-32 mx-auto mb-4">
-            <svg className="w-full h-full transform -rotate-90">
-              <circle
-                cx="64"
-                cy="64"
-                r="56"
-                stroke="#e5e7eb"
-                strokeWidth="8"
-                fill="none"
-              />
-              <circle
-                cx="64"
-                cy="64"
-                r="56"
-                stroke={confidenceScore >= 7 ? '#22c55e' : confidenceScore >= 5 ? '#0ea5e9' : '#f59e0b'}
-                strokeWidth="8"
-                fill="none"
-                strokeLinecap="round"
-                strokeDasharray={`${(confidenceScore / 10) * 352} 352`}
-                className="transition-all duration-1000"
-              />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-4xl font-bold text-gray-800">{confidenceScore}</span>
-              <span className="text-lg text-gray-400 mt-2">/10</span>
+
+          {feedback.noSpeechDetected ? (
+            <div className="py-4">
+              <p className="text-4xl mb-3">🎤</p>
+              <p className="text-gray-500 text-sm">No speech detected in this session.</p>
             </div>
-          </div>
+          ) : (
+            <div className="relative w-32 h-32 mx-auto mb-4">
+              <svg className="w-full h-full transform -rotate-90">
+                <circle cx="64" cy="64" r="56" stroke="#e5e7eb" strokeWidth="8" fill="none" />
+                <circle
+                  cx="64"
+                  cy="64"
+                  r="56"
+                  stroke={confidenceScore >= 7 ? '#22c55e' : confidenceScore >= 5 ? '#0ea5e9' : '#f59e0b'}
+                  strokeWidth="8"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeDasharray={`${(confidenceScore / 10) * 352} 352`}
+                  className="transition-all duration-1000"
+                />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-4xl font-bold text-gray-800">{confidenceScore}</span>
+                <span className="text-lg text-gray-400 mt-2">/10</span>
+              </div>
+            </div>
+          )}
 
           <p className="text-gray-600 leading-relaxed">{summary}</p>
         </div>
       </div>
 
-      {/* Detailed Scores */}
-      <div className="max-w-md mx-auto mb-8 animate-slide-up" style={{ animationDelay: '0.2s' }}>
-        <div className="bg-white rounded-2xl shadow-lg p-6">
-          <h2 className="text-lg font-medium text-gray-800 mb-4">Detailed Scores</h2>
-          
-          {Object.entries(scores).map(([key, value]) => (
-            <ScoreBar 
-              key={key}
-              label={scoreLabels[key] || key}
-              score={value}
-            />
-          ))}
+      {/* Detailed Scores — only shown if there are scores to display */}
+      {availableScores.length > 0 && (
+        <div className="max-w-md mx-auto mb-8 animate-slide-up" style={{ animationDelay: '0.2s' }}>
+          <div className="bg-white rounded-2xl shadow-lg p-6">
+            <h2 className="text-lg font-medium text-gray-800 mb-4">Detailed Scores</h2>
+            {availableScores.map(([key, value]) => (
+              <ScoreBar
+                key={key}
+                label={scoreLabels[key] || key}
+                score={value as number}
+              />
+            ))}
+            <p className="text-xs text-gray-400 mt-4">
+              Scores are computed from your actual speech transcript
+              {Object.keys(scores).includes('eyeContact') ? ' and camera feed' : ''}.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Improvement Tips */}
       {showTips && improvementTips.length > 0 && (
@@ -196,7 +227,6 @@ export default function FeedbackPage() {
               </svg>
               Tips for Improvement
             </h2>
-            
             <ul className="space-y-3">
               {improvementTips.map((tip, index) => (
                 <li key={index} className="flex gap-3 text-gray-700">
@@ -213,11 +243,39 @@ export default function FeedbackPage() {
 
       {/* Action Buttons */}
       <div className="max-w-md mx-auto flex flex-col gap-3 animate-fade-in" style={{ animationDelay: '0.4s' }}>
+
         {/* Streak toast */}
         {streakMessage && (
           <div className="flex items-center gap-3 bg-warm-50 border border-warm-200 rounded-2xl p-4 animate-fade-in">
             <span className="text-2xl" role="img" aria-label="fire">🔥</span>
             <p className="text-warm-800 font-medium text-sm">{streakMessage}</p>
+          </div>
+        )}
+
+        {/* XP toast */}
+        {xpEarned !== null && (
+          <div className="flex items-center gap-3 bg-primary-50 border border-primary-200 rounded-2xl p-4 animate-fade-in">
+            <span className="text-2xl">⚡</span>
+            <p className="text-primary-800 font-medium text-sm">+{xpEarned} XP earned!</p>
+          </div>
+        )}
+
+        {/* New badges toast */}
+        {newBadges.length > 0 && (
+          <div className="bg-primary-500 rounded-2xl p-4 animate-fade-in">
+            <p className="text-white font-semibold text-sm mb-2">
+              New badge{newBadges.length > 1 ? 's' : ''} unlocked!
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {newBadges.map((badgeId) => {
+                const badge = BADGES.find((b) => b.id === badgeId);
+                return badge ? (
+                  <span key={badgeId} className="bg-white/20 text-white text-xs font-semibold px-2.5 py-1 rounded-full">
+                    {badge.label}
+                  </span>
+                ) : null;
+              })}
+            </div>
           </div>
         )}
 
@@ -249,9 +307,8 @@ export default function FeedbackPage() {
         </button>
       </div>
 
-      {/* Encouragement */}
       <p className="text-center text-sm text-gray-400 mt-8 animate-fade-in" style={{ animationDelay: '0.6s' }}>
-        Every interview makes you better. Keep practicing!
+        Every session makes you better. Keep practising!
       </p>
     </div>
   );

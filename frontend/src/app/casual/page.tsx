@@ -25,7 +25,6 @@ export default function CasualTalkPage() {
     connect,
     disconnect,
     sendAudio,
-    commitAudio,
   } = useRealtimeWebSocket({
     mode: 'casual',
     onAudioDelta: (delta) => {
@@ -41,7 +40,6 @@ export default function CasualTalkPage() {
       setAITranscript(text);
     },
     onUserTranscript: (text) => {
-      console.log('User said:', text);
       setTranscript(text);
     },
     onResponseComplete: () => {
@@ -78,27 +76,21 @@ export default function CasualTalkPage() {
     router.push('/mode-select');
   }, [disconnect, stopRecording, router]);
 
-  // Handle mic press (start recording)
-  const handleMicPress = useCallback(async () => {
-    if (status !== 'connected' || isAISpeaking) return;
-    
-    try {
-      // Clear previous transcript
-      setTranscript('');
-      await startRecording();
-    } catch (err) {
-      console.error('Failed to start recording:', err);
-    }
-  }, [status, isAISpeaking, startRecording]);
+  // Toggle mic on/off — VAD handles speech detection automatically
+  const handleMicToggle = useCallback(async () => {
+    if (status !== 'connected') return;
 
-  // Handle mic release (stop recording and send to AI)
-  const handleMicRelease = useCallback(() => {
     if (isRecording) {
       stopRecording();
-      commitAudio();
-      setAITranscript(''); // Clear AI transcript for new response
+    } else {
+      try {
+        setTranscript('');
+        await startRecording();
+      } catch (err) {
+        console.error('Failed to start recording:', err);
+      }
     }
-  }, [isRecording, stopRecording, commitAudio]);
+  }, [status, isRecording, startRecording, stopRecording]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -139,15 +131,15 @@ export default function CasualTalkPage() {
               </div>
               <h2 className="text-2xl font-bold text-gray-800 mb-2">Ready to Chat?</h2>
               <p className="text-gray-500 max-w-sm">
-                Have a friendly conversation with your AI practice partner. 
+                Have a friendly conversation with your AI practice partner.
                 No pressure, just speak naturally!
               </p>
             </div>
 
             <button
               onClick={handleStartSession}
-              className="bg-primary-500 hover:bg-primary-600 text-white text-lg font-semibold 
-                         py-4 px-10 rounded-full shadow-lg hover:shadow-xl 
+              className="bg-primary-500 hover:bg-primary-600 text-white text-lg font-semibold
+                         py-4 px-10 rounded-full shadow-lg hover:shadow-xl
                          transform hover:scale-105 transition-all duration-300"
             >
               Start Talking
@@ -182,25 +174,26 @@ export default function CasualTalkPage() {
             {/* Spacer */}
             <div className="flex-1" />
 
-            {/* Recording status */}
+            {/* Status text */}
             <div className="text-center mb-4">
-              <p className={`text-sm ${isRecording ? 'text-red-500' : 'text-gray-400'}`}>
-                {isRecording ? 'Listening...' : isAISpeaking ? 'AI is speaking...' : 'Hold the mic to speak'}
+              <p className={`text-sm ${isRecording ? 'text-green-600' : 'text-gray-400'}`}>
+                {isRecording
+                  ? isAISpeaking ? 'AI is speaking...' : 'Listening — speak naturally'
+                  : 'Microphone muted'}
               </p>
             </div>
 
-            {/* Mic Button */}
+            {/* Mic Toggle Button */}
             <MicButton
-              isRecording={isRecording}
+              isMicOn={isRecording}
               isDisabled={status !== 'connected'}
               isAISpeaking={isAISpeaking}
-              onPress={handleMicPress}
-              onRelease={handleMicRelease}
+              onToggle={handleMicToggle}
             />
 
-            {/* Tip */}
+            {/* Hint */}
             <p className="text-xs text-gray-400 text-center mt-4">
-              Press and hold to speak, release to send
+              {isRecording ? 'Click mic to mute' : 'Click mic to unmute and speak'}
             </p>
           </div>
         )}

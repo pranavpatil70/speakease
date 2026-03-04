@@ -2,7 +2,14 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getProgress, getMonthlyProgress, type UserProgress } from '@/lib/progressState';
+import {
+  getProgress,
+  getMonthlyProgress,
+  computeLevel,
+  getNextLevelInfo,
+  BADGES,
+  type UserProgress,
+} from '@/lib/progressState';
 
 export default function ProgressPage() {
   const router = useRouter();
@@ -26,6 +33,11 @@ export default function ProgressPage() {
   const fieldEntries = Object.entries(progress.fieldStats).sort(
     ([, a], [, b]) => b.totalSessions - a.totalSessions
   );
+
+  const level = computeLevel(progress.xp);
+  const nextLevelInfo = getNextLevelInfo(progress.xp);
+  const earnedBadges = progress.badges;
+  const hasBadges = earnedBadges.length > 0;
 
   return (
     <div className="min-h-screen flex flex-col px-6 py-8 bg-gradient-to-b from-primary-50 to-white">
@@ -60,8 +72,73 @@ export default function ProgressPage() {
           </div>
         </div>
 
-        {/* Monthly Progress */}
+        {/* XP + Level Card */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 animate-slide-up" style={{ animationDelay: '0.05s' }}>
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold bg-primary-100 text-primary-700 px-2.5 py-1 rounded-full">
+                {level}
+              </span>
+            </div>
+            <span className="text-sm font-bold text-gray-700">{progress.xp} XP total</span>
+          </div>
+          <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary-500 rounded-full transition-all duration-700"
+              style={{ width: `${nextLevelInfo.pct}%` }}
+            />
+          </div>
+          {nextLevelInfo.xpNeeded > 0 ? (
+            <p className="text-xs text-gray-400 mt-2">
+              {nextLevelInfo.xpNeeded} XP to reach <span className="font-medium text-gray-600">{nextLevelInfo.label}</span>
+            </p>
+          ) : (
+            <p className="text-xs text-gray-400 mt-2">Maximum level reached — keep practising!</p>
+          )}
+        </div>
+
+        {/* Badges */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+          <h2 className="font-medium text-gray-700 mb-3">Badges</h2>
+          {hasBadges ? (
+            <div className="flex flex-wrap gap-2">
+              {BADGES.map((b) => {
+                const earned = earnedBadges.includes(b.id);
+                return (
+                  <div
+                    key={b.id}
+                    title={b.description}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold border transition-all ${
+                      earned
+                        ? 'bg-primary-500 text-white border-primary-500'
+                        : 'bg-gray-100 text-gray-400 border-gray-200'
+                    }`}
+                  >
+                    {earned ? '' : '🔒 '}{b.label}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {BADGES.map((b) => (
+                <div
+                  key={b.id}
+                  title={b.description}
+                  className="rounded-full px-3 py-1.5 text-xs font-semibold border bg-gray-100 text-gray-400 border-gray-200"
+                >
+                  🔒 {b.label}
+                </div>
+              ))}
+            </div>
+          )}
+          {!hasBadges && (
+            <p className="text-xs text-gray-400 mt-3">Complete your first session to earn your first badge!</p>
+          )}
+        </div>
+
+        {/* Monthly Progress */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 animate-slide-up" style={{ animationDelay: '0.15s' }}>
           <div className="flex justify-between mb-2">
             <span className="font-medium text-gray-700">This Month</span>
             <span className="font-bold text-gray-800">{monthlyCount} / {progress.monthlyGoal}</span>
@@ -76,11 +153,11 @@ export default function ProgressPage() {
         </div>
 
         {/* Confidence Trend */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 animate-slide-up" style={{ animationDelay: '0.1s' }}>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 animate-slide-up" style={{ animationDelay: '0.2s' }}>
           <h2 className="font-medium text-gray-700 mb-4">Confidence Trend</h2>
           {last10.length === 0 ? (
             <p className="text-gray-400 text-sm text-center py-4">
-              No sessions yet. Complete your first interview to see your trend!
+              No sessions yet. Complete your first challenge to see your trend!
             </p>
           ) : (
             <div className="flex items-end gap-1.5 h-20">
@@ -92,7 +169,7 @@ export default function ProgressPage() {
                   <div
                     key={i}
                     className="flex-1 flex flex-col justify-end h-full"
-                    title={`${session.confidenceScore}/10 · ${new Date(session.date).toLocaleDateString()} · ${session.field}`}
+                    title={`${session.confidenceScore}/10 · ${new Date(session.date).toLocaleDateString()} · ${session.sessionType === 'daily' ? 'Daily' : session.field}`}
                   >
                     <div
                       className={`${color} rounded-t-sm w-full transition-all duration-700`}
@@ -108,15 +185,29 @@ export default function ProgressPage() {
           )}
         </div>
 
-        {/* Total Sessions */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center justify-between animate-slide-up" style={{ animationDelay: '0.15s' }}>
-          <span className="font-medium text-gray-700">Total Sessions</span>
-          <span className="text-2xl font-bold text-primary-600">{progress.totalSessions}</span>
+        {/* Session Stats */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 animate-slide-up" style={{ animationDelay: '0.25s' }}>
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <div className="text-2xl font-bold text-primary-600">{progress.totalSessions}</div>
+              <div className="text-xs text-gray-500 mt-0.5">Total</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-warm-600">
+                {progress.sessions.filter((s) => s.sessionType === 'interview').length}
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5">Interviews</div>
+            </div>
+            <div>
+              <div className="text-2xl font-bold text-sage-600">{progress.dailyChallengesCompleted}</div>
+              <div className="text-xs text-gray-500 mt-0.5">Daily</div>
+            </div>
+          </div>
         </div>
 
         {/* Field Breakdown */}
         {fieldEntries.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 animate-slide-up" style={{ animationDelay: '0.2s' }}>
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 animate-slide-up" style={{ animationDelay: '0.3s' }}>
             <h2 className="font-medium text-gray-700 mb-4">Fields Practiced</h2>
             <div className="flex flex-col gap-3">
               {fieldEntries.map(([field, stats]) => (
@@ -136,12 +227,12 @@ export default function ProgressPage() {
 
         {/* CTA */}
         <button
-          onClick={() => router.push('/interview-setup')}
-          className="w-full bg-warm-600 hover:bg-warm-700 text-white text-lg font-semibold
+          onClick={() => router.push('/mode-select')}
+          className="w-full bg-primary-500 hover:bg-primary-600 text-white text-lg font-semibold
                      py-4 rounded-full shadow-lg hover:shadow-xl
                      transform hover:scale-102 transition-all duration-300
                      animate-slide-up"
-          style={{ animationDelay: '0.25s' }}
+          style={{ animationDelay: '0.35s' }}
         >
           Start Today&apos;s Practice
         </button>

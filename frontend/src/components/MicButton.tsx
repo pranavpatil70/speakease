@@ -1,66 +1,30 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 
 interface MicButtonProps {
-  isRecording: boolean;
+  isMicOn: boolean;
   isDisabled?: boolean;
   isAISpeaking?: boolean;
-  onPress: () => void;
-  onRelease: () => void;
+  onToggle: () => void;
   size?: 'normal' | 'large';
 }
 
 /**
- * Push-to-talk microphone button
- * Big, prominent, and easy to use
+ * Toggle microphone button — click once to unmute, click again to mute.
+ * Works like Zoom/Google Meet: the realtime VAD detects speech automatically.
  */
 export function MicButton({
-  isRecording,
+  isMicOn,
   isDisabled = false,
   isAISpeaking = false,
-  onPress,
-  onRelease,
+  onToggle,
   size = 'large'
 }: MicButtonProps) {
-  const [isPressed, setIsPressed] = useState(false);
-
-  const handlePressStart = useCallback(() => {
-    if (isDisabled || isAISpeaking) return;
-    setIsPressed(true);
-    onPress();
-  }, [isDisabled, isAISpeaking, onPress]);
-
-  const handlePressEnd = useCallback(() => {
-    if (isPressed) {
-      setIsPressed(false);
-      onRelease();
-    }
-  }, [isPressed, onRelease]);
-
-  // Touch handlers call preventDefault to stop the browser from synthesizing
-  // mouse events (onMouseDown/onMouseUp) after touch events fire.
-  // Without this, a tap fires: touchstart → touchend → mousedown → mouseup,
-  // causing startRecording() to be called twice.
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    e.preventDefault();
-    handlePressStart();
-  }, [handlePressStart]);
-
-  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    e.preventDefault();
-    handlePressEnd();
-  }, [handlePressEnd]);
-
-  // Called when a touch is cancelled (e.g. incoming phone call, system gesture)
-  // Must stop recording so it doesn't get stuck in recording state
-  const handleTouchCancel = useCallback((e: React.TouchEvent) => {
-    e.preventDefault();
-    if (isPressed) {
-      setIsPressed(false);
-      onRelease();
-    }
-  }, [isPressed, onRelease]);
+  const handleClick = useCallback(() => {
+    if (isDisabled) return;
+    onToggle();
+  }, [isDisabled, onToggle]);
 
   const sizeClasses = size === 'large'
     ? 'w-28 h-28 md:w-32 md:h-32'
@@ -70,12 +34,12 @@ export function MicButton({
 
   return (
     <div className="relative flex items-center justify-center">
-      {/* Pulse rings when recording */}
-      {isRecording && (
+      {/* Pulse ring when mic is on (streaming audio) */}
+      {isMicOn && (
         <>
-          <div className="absolute rounded-full bg-red-400/30 pulse-ring"
+          <div className="absolute rounded-full bg-green-400/25 pulse-ring"
                style={{ width: '150%', height: '150%' }} />
-          <div className="absolute rounded-full bg-red-400/20 pulse-ring"
+          <div className="absolute rounded-full bg-green-400/15 pulse-ring"
                style={{ width: '180%', height: '180%', animationDelay: '0.3s' }} />
         </>
       )}
@@ -87,12 +51,7 @@ export function MicButton({
       )}
 
       <button
-        onMouseDown={handlePressStart}
-        onMouseUp={handlePressEnd}
-        onMouseLeave={handlePressEnd}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-        onTouchCancel={handleTouchCancel}
+        onClick={handleClick}
         disabled={isDisabled}
         className={`
           ${sizeClasses}
@@ -100,27 +59,20 @@ export function MicButton({
           flex items-center justify-center
           transition-all duration-200
           focus:outline-none focus:ring-4
-          select-none touch-none
+          select-none
           ${isDisabled
             ? 'bg-gray-300 cursor-not-allowed'
-            : isRecording
-              ? 'bg-red-500 shadow-lg shadow-red-500/50 scale-110'
-              : isAISpeaking
-                ? 'bg-primary-400 cursor-wait'
-                : 'bg-primary-500 hover:bg-primary-600 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95'
+            : isMicOn
+              ? 'bg-green-500 hover:bg-green-600 shadow-lg shadow-green-500/40 scale-105'
+              : 'bg-gray-500 hover:bg-gray-600 shadow-lg hover:shadow-xl hover:scale-105 active:scale-95'
           }
-          ${isRecording ? 'focus:ring-red-300' : 'focus:ring-primary-300'}
+          ${isMicOn ? 'focus:ring-green-300' : 'focus:ring-gray-300'}
         `}
-        aria-label={isRecording ? 'Recording... Release to stop' : 'Hold to speak'}
+        aria-label={isMicOn ? 'Microphone on — click to mute' : 'Microphone muted — click to unmute'}
+        title={isMicOn ? 'Click to mute' : 'Click to unmute'}
       >
-        {isRecording ? (
-          // Recording icon (pause bars)
-          <div className="flex gap-1">
-            <div className="w-2 h-8 bg-white rounded" />
-            <div className="w-2 h-8 bg-white rounded" />
-          </div>
-        ) : (
-          // Microphone icon
+        {isMicOn ? (
+          // Active mic icon
           <svg
             className={`${iconSize} text-white`}
             fill="none"
@@ -134,9 +86,32 @@ export function MicButton({
               d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
             />
           </svg>
+        ) : (
+          // Muted mic icon (mic with slash)
+          <svg
+            className={`${iconSize} text-white`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+            />
+            <line
+              x1="3"
+              y1="3"
+              x2="21"
+              y2="21"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+            />
+          </svg>
         )}
       </button>
     </div>
   );
 }
-
